@@ -30,18 +30,24 @@ def build_agent(
     sink: Callable | None = None,
     logger=None,
     with_log: bool = True,
+    provider=None,
+    workspace: Path | str | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> AgentLoop:
     """装配一个可运行的 agent。
 
     approval 为 None 时的默认行为是**拒绝**所有需确认命令，
-    除非显式打开 auto_approve。对未来的 HTTP 层来说这个默认值是安全的：
+    除非显式打开 auto_approve。对 HTTP 层来说这个默认值是安全的：
     没有接上审批 UI 之前，危险命令不会被执行。
+
+    provider 可注入：HTTP 层用它把手写实现换成别的模型，
+    测试用它换成 ScriptedProvider，从而完全不碰网络。
     """
     if approval is None:
         approval = (lambda command: True) if settings.auto_approve else (lambda command: False)
 
     ctx = ToolContext(
-        workspace=Path(settings.workspace).resolve(),
+        workspace=Path(workspace or settings.workspace).resolve(),
         max_chars=settings.max_output_chars,
         max_lines=settings.max_output_lines,
         timeout=settings.command_timeout,
@@ -49,7 +55,6 @@ def build_agent(
         approval=approval,
     )
     tools = build_default_tools(ctx)
-    provider = build_provider(settings)
 
     if logger is None:
         logger = RunLogger(settings.log_dir) if with_log else NullLogger()
@@ -58,4 +63,11 @@ def build_agent(
         max_iterations=settings.max_iterations,
         max_consecutive_failures=settings.max_consecutive_failures,
     )
-    return AgentLoop(provider=provider, tools=tools, config=config, logger=logger, sink=sink)
+    return AgentLoop(
+        provider=provider or build_provider(settings),
+        tools=tools,
+        config=config,
+        logger=logger,
+        sink=sink,
+        should_stop=should_stop,
+    )

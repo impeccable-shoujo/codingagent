@@ -107,6 +107,47 @@ def test_tool_exception_is_captured_as_failure():
     assert "kaboom" in tool_message.content
 
 
+def test_loop_stops_immediately_when_signalled():
+    tool = make_tool("dummy")
+    provider = ScriptedProvider(script=[call("dummy")] * 10)
+    loop = AgentLoop(provider, registry_with(tool), should_stop=lambda: True)
+
+    result = loop.run("马上中断")
+
+    assert result.stop_reason == "stopped"
+    assert not result.succeeded
+    assert len(tool.calls) == 0  # type: ignore[attr-defined]
+    assert not provider.calls, "中断信号应在调用模型之前就被检查"
+
+
+def test_loop_stops_between_iterations():
+    """第一次工具执行完才要求停止，第二轮不应再动工具。"""
+    tool = make_tool("dummy")
+    provider = ScriptedProvider(script=[call("dummy")] * 10)
+    flag = {"stop": False}
+
+    def sink(event):
+        if event.type == "tool_result":
+            flag["stop"] = True
+
+    loop = AgentLoop(provider, registry_with(tool), sink=sink, should_stop=lambda: flag["stop"])
+
+    result = loop.run("跑一轮就停")
+
+    assert result.stop_reason == "stopped"
+    assert result.iterations == 2
+    assert len(tool.calls) == 1  # type: ignore[attr-defined]
+
+
+def test_loop_without_should_stop_never_reports_stopped():
+    provider = ScriptedProvider(script=[], final_text="正常结束")
+    loop = AgentLoop(provider, registry_with(make_tool("dummy")))
+
+    result = loop.run("正常跑")
+
+    assert result.stop_reason == "completed"
+
+
 def test_provider_error_stops_loop_cleanly():
     class BrokenProvider(ScriptedProvider):
         def chat(self, messages, tools=None):

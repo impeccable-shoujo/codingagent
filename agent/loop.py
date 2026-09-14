@@ -24,6 +24,8 @@ DEFAULT_SYSTEM_PROMPT = """你是一个在用户代码仓库里工作的 coding 
 所有路径都相对工作区根目录，不要使用绝对路径或 ../ 逃逸。
 完成标准：验证通过，并在最终回复里简要说明改了什么、怎么验证的。"""
 
+STOPPED_TEXT = "任务已被中断。"
+
 
 @dataclass
 class LoopConfig:
@@ -54,12 +56,22 @@ class AgentLoop:
         config: LoopConfig | None = None,
         logger=None,
         sink=None,
+        should_stop=None,
     ) -> None:
         self.provider = provider
         self.tools = tools
         self.config = config or LoopConfig()
         self.logger = logger
         self.sink = sink
+        self.should_stop = should_stop
+
+    def interrupted(self) -> bool:
+        """外部中断信号。
+
+        做成可注入的回调而不是内部标志位：调用方可能是终端里的 Ctrl+C，
+        也可能是 HTTP 层的 /stop，主循环不该关心中断从哪来。
+        """
+        return bool(self.should_stop and self.should_stop())
 
     def _emit(self, type_: str, **data) -> AgentEvent:
         event = AgentEvent(type=type_, data=data)
@@ -84,6 +96,12 @@ class AgentLoop:
 
         for iteration in range(1, cfg.max_iterations + 1):
             iterations = iteration
+
+            if self.interrupted():
+                stop_reason, final_text = "stopped", STOPPED_TEXT
+                events.append(self._emit("interrupted", reason=stop_reason))
+                break
+
             events.append(self._emit("iteration_start", iteration=iteration))
 
             try:
@@ -108,6 +126,11 @@ class AgentLoop:
                 break
 
             for call in assistant.tool_calls:
+                if self.interrupted():
+                    stop_reason, final_text = "stopped", STOPPED_TEXT
+                    events.append(self._emit("interrupted", reason=stop_reason))
+                    break
+
                 result = self._execute(call)
                 events.append(self._emit(
                     "tool_result",
@@ -122,6 +145,8 @@ class AgentLoop:
                 if consecutive_failures >= cfg.max_consecutive_failures:
                     break
 
+            if stop_reason == "stopped":
+                break
             if consecutive_failures >= cfg.max_consecutive_failures:
                 stop_reason = "consecutive_failures"
                 final_text = (
