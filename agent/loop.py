@@ -160,7 +160,21 @@ class AgentLoop:
         else:
             stop_reason = "max_iterations"
 
-        events.append(self._emit("done", reason=stop_reason, text=final_text))
+        # done 带上轮次与用量：前端状态栏要显示"跑了几轮、花了多少 token"，
+        # 有这两个字段就不必再回查一次任务快照。
+        events.append(
+            self._emit(
+                "done",
+                reason=stop_reason,
+                text=final_text,
+                iterations=iterations,
+                usage={
+                    "prompt_tokens": usage.prompt_tokens,
+                    "completion_tokens": usage.completion_tokens,
+                    "total_tokens": usage.total_tokens,
+                },
+            )
+        )
         return RunResult(
             text=final_text,
             stop_reason=stop_reason,
