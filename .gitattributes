@@ -1,0 +1,8 @@
+# 批处理文件必须用 CRLF 换行。
+# cmd.exe 是按字节偏移逐条读取批处理文件的，用 LF 换行时
+# goto 标签与 for 循环的定位可能失败，症状是"标签找不到"这类怪问题。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# shell 脚本反过来，必须是 LF
+*.sh text eol=lf
