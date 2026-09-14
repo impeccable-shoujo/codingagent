@@ -1,0 +1,180 @@
+"""配置层测试：优先级、类型校验、密钥解析、以及"不污染进程环境"。"""
+
+import dataclasses
+import os
+from pathlib import Path
+
+import pytest
+
+from agent.config import ConfigError, Settings, describe, load_env_file, mask_secret
+
+
+def write_env(tmp_path, content: str) -> Path:
+    path = tmp_path / ".env"
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def test_defaults_when_nothing_configured(tmp_path):
+    settings = Settings.from_env(env={}, env_file=tmp_path / "missing.env")
+    assert settings.model == "glm-4.7-flash"
+    assert settings.max_iterations == 25
+    assert settings.max_consecutive_failures == 3
+    assert settings.auto_approve is False
+    assert settings.api_key is None
+    assert settings.workspace == Path(".")
+
+
+def test_env_file_is_loaded(tmp_path):
+    env_file = write_env(tmp_path, "AGENT_MODEL=deepseek-chat\nAGENT_MAX_ITERATIONS=7\n")
+    settings = Settings.from_env(env={}, env_file=env_file)
+    assert settings.model == "deepseek-chat"
+    assert settings.max_iterations == 7
+
+
+def test_real_env_overrides_env_file(tmp_path):
+    """CI / 临时覆盖必须压过仓库里的 .env，否则线上行为会被本地文件改掉。"""
+    env_file = write_env(tmp_path, "AGENT_MODEL=from-file\n")
+    settings = Settings.from_env(env={"AGENT_MODEL": "from-env"}, env_file=env_file)
+    assert settings.model == "from-env"
+
+
+def test_quoted_values_are_unwrapped(tmp_path):
+    env_file = write_env(tmp_path, 'AGENT_MODEL="glm-4.7-flash"\n')
+    assert Settings.from_env(env={}, env_file=env_file).model == "glm-4.7-flash"
+
+
+def test_env_file_with_comments_and_blank_lines(tmp_path):
+    env_file = write_env(tmp_path, "# 注释\n\nAGENT_MODEL=m1\n\n# 又一行注释\n")
+    assert Settings.from_env(env={}, env_file=env_file).model == "m1"
+
+
+def test_api_key_read_directly_from_env_file(tmp_path):
+    env_file = write_env(tmp_path, "AGENT_API_KEY=sk-abcdef123456\n")
+    assert Settings.from_env(env={}, env_file=env_file).api_key == "sk-abcdef123456"
+
+
+def test_api_key_resolved_indirectly_via_key_env(tmp_path):
+    env_file = write_env(tmp_path, "AGENT_API_KEY_ENV=MY_CUSTOM_KEY\n")
+    settings = Settings.from_env(env={"MY_CUSTOM_KEY": "sk-indirect"}, env_file=env_file)
+    assert settings.api_key == "sk-indirect"
+
+
+def test_direct_api_key_beats_indirect(tmp_path):
+    env_file = write_env(tmp_path, "AGENT_API_KEY_ENV=MY_CUSTOM_KEY\nAGENT_API_KEY=sk-direct\n")
+    settings = Settings.from_env(env={"MY_CUSTOM_KEY": "sk-indirect"}, env_file=env_file)
+    assert settings.api_key == "sk-direct"
+
+
+def test_reading_config_does_not_pollute_os_environ(tmp_path, monkeypatch):
+    """配置读取必须无全局副作用，否则测试之间会互相污染。"""
+    monkeypatch.delenv("AGENT_MODEL", raising=False)
+    env_file = write_env(tmp_path, "AGENT_MODEL=leaked-into-environ\n")
+    Settings.from_env(env={}, env_file=env_file)
+    assert "AGENT_MODEL" not in os.environ
+
+
+def test_empty_value_falls_back_to_default(tmp_path):
+    env_file = write_env(tmp_path, "AGENT_MAX_ITERATIONS=\nAGENT_API_KEY=\n")
+    settings = Settings.from_env(env={}, env_file=env_file)
+    assert settings.max_iterations == 25
+    assert settings.api_key is None
+
+
+@pytest.mark.parametrize("value", ["abc", "1.5", "十"])
+def test_invalid_int_raises(tmp_path, value):
+    env_file = write_env(tmp_path, f"AGENT_MAX_ITERATIONS={value}\n")
+    with pytest.raises(ConfigError, match="必须是整数"):
+        Settings.from_env(env={}, env_file=env_file)
+
+
+@pytest.mark.parametrize(
+    "line,match",
+    [
+        ("AGENT_MAX_ITERATIONS=0", "必须 >= 1"),
+        ("AGENT_MAX_OUTPUT_CHARS=10", "必须 >= 100"),
+        ("AGENT_COMMAND_TIMEOUT=0", "必须 >= 1"),
+    ],
+)
+def test_out_of_range_int_raises(tmp_path, line, match):
+    env_file = write_env(tmp_path, line + "\n")
+    with pytest.raises(ConfigError, match=match):
+        Settings.from_env(env={}, env_file=env_file)
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("true", True),
+        ("TRUE", True),
+        ("1", True),
+        ("yes", True),
+        ("on", True),
+        ("false", False),
+        ("False", False),
+        ("0", False),
+        ("no", False),
+        ("off", False),
+    ],
+)
+def test_bool_parsing(tmp_path, raw, expected):
+    env_file = write_env(tmp_path, f"AGENT_AUTO_APPROVE={raw}\n")
+    assert Settings.from_env(env={}, env_file=env_file).auto_approve is expected
+
+
+def test_invalid_bool_raises(tmp_path):
+    env_file = write_env(tmp_path, "AGENT_AUTO_APPROVE=maybe\n")
+    with pytest.raises(ConfigError, match="必须是布尔值"):
+        Settings.from_env(env={}, env_file=env_file)
+
+
+def test_negative_temperature_is_allowed(tmp_path):
+    env_file = write_env(tmp_path, "AGENT_TEMPERATURE=0.2\n")
+    assert Settings.from_env(env={}, env_file=env_file).temperature == pytest.approx(0.2)
+
+
+def test_settings_is_immutable(tmp_path):
+    settings = Settings.from_env(env={}, env_file=tmp_path / "x.env")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        settings.model = "other"  # type: ignore[misc]
+
+
+def test_describe_masks_api_key(tmp_path):
+    env_file = write_env(tmp_path, "AGENT_API_KEY=sk-verysecretvalue1234\n")
+    text = describe(Settings.from_env(env={}, env_file=env_file))
+    assert "verysecretvalue" not in text
+    assert "sk-v" in text
+
+
+def test_mask_secret_edge_cases():
+    assert mask_secret(None) == "(未设置)"
+    assert mask_secret("short") == "*****"
+    assert mask_secret("sk-1234567890ab") == "sk-1...90ab"
+
+
+def test_load_env_file_missing_returns_empty(tmp_path):
+    assert load_env_file(tmp_path / "nope.env") == {}
+    assert load_env_file(None) == {}
+
+
+def test_shipped_env_example_is_valid_and_documents_all_keys():
+    """.env.example 必须能被解析，且覆盖所有受支持的配置项。"""
+    example = Path(__file__).resolve().parent.parent / ".env.example"
+    values = load_env_file(example)
+    expected_keys = {
+        "AGENT_MODEL",
+        "AGENT_BASE_URL",
+        "AGENT_TEMPERATURE",
+        "AGENT_API_KEY",
+        "AGENT_API_KEY_ENV",
+        "AGENT_MAX_ITERATIONS",
+        "AGENT_MAX_CONSECUTIVE_FAILURES",
+        "AGENT_COMMAND_TIMEOUT",
+        "AGENT_MAX_OUTPUT_CHARS",
+        "AGENT_MAX_OUTPUT_LINES",
+        "AGENT_WORKSPACE",
+        "AGENT_LOG_DIR",
+        "AGENT_AUTO_APPROVE",
+    }
+    missing = expected_keys - set(values)
+    assert not missing, f".env.example 缺少配置项：{sorted(missing)}"
