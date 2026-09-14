@@ -6,9 +6,10 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 
-from ..util import decode_output
+from ..util import decode_output, interpreter_path_dirs
 from .base import Tool, ToolContext, ToolResult, truncate_output
 from .guard import GuardAction
 
@@ -22,6 +23,20 @@ PARAMETERS = {
 }
 
 MAX_TIMEOUT = 300
+
+
+def _subprocess_env() -> dict[str, str]:
+    """让命令跑在和 agent 同一个 Python 环境里。
+
+    只把命令写成绝对路径是不够的：子进程解析 `python` / `pytest` 看的是 PATH，
+    所以这里把当前解释器所在环境的目录 prepend 上去。否则 agent 在项目虚拟环境里
+    运行、子进程却在别的 Python 上跑，会报出莫名其妙的 "No module named pytest"。
+    """
+    env = os.environ.copy()
+    prefix = os.pathsep.join(str(path) for path in interpreter_path_dirs())
+    existing = env.get("PATH", "")
+    env["PATH"] = f"{prefix}{os.pathsep}{existing}" if existing else prefix
+    return env
 
 
 def build_bash_tool(ctx: ToolContext) -> Tool:
@@ -49,6 +64,7 @@ def build_bash_tool(ctx: ToolContext) -> Tool:
                 cwd=str(ctx.workspace),
                 capture_output=True,
                 timeout=timeout,
+                env=_subprocess_env(),
             )
         except subprocess.TimeoutExpired:
             return ToolResult(ok=False, error=f"命令超时（{timeout}s）：{command}")

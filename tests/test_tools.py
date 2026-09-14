@@ -1,5 +1,6 @@
 """工具层测试：读、写、执行，以及它们的边界。"""
 
+import os
 import sys
 
 import pytest
@@ -10,6 +11,7 @@ from agent.tools import (
     build_default_tools,
     truncate_output,
 )
+from agent.util import interpreter_path_dirs
 
 
 @pytest.fixture
@@ -164,6 +166,35 @@ def test_bash_missing_command(tools):
     result = tools.get("bash").fn({})
     assert not result.ok
     assert "缺少参数" in result.error
+
+
+# ---------- 子进程环境隔离 ----------
+
+
+def test_subprocess_env_prepends_interpreter_dirs():
+    """解释器所在环境必须排在 PATH 最前面，子进程才能和 agent 同源。"""
+    from agent.tools.bash import _subprocess_env
+
+    dirs = [str(path) for path in interpreter_path_dirs()]
+    assert dirs, "至少要包含解释器所在目录"
+    assert _subprocess_env()["PATH"].split(os.pathsep)[: len(dirs)] == dirs
+
+
+def test_bash_subprocess_uses_same_python_as_agent(tools):
+    """踩过的坑：agent 在项目环境里跑，子进程却落到系统 Python 上。"""
+    result = tools.get("bash").fn({"command": "python -V"})
+
+    assert result.ok, result.to_content()
+    expected = f"{sys.version_info.major}.{sys.version_info.minor}"
+    assert expected in result.output, f"子进程 Python 版本与 agent 不一致：{result.output!r}"
+
+
+def test_bash_subprocess_can_find_pytest(tools):
+    """pytest 入口必须能被找到——这正是之前真实冒烟失败的原因。"""
+    result = tools.get("bash").fn({"command": "pytest --version"})
+
+    assert result.ok, result.to_content()
+    assert "pytest" in result.output
 
 
 # ---------- 截断 ----------
