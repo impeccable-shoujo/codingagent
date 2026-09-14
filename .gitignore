@@ -10,9 +10,12 @@ build/
 .coverage
 htmlcov/
 
-# Node（前端后续会用到）
+# Node / 前端
 node_modules/
 npm-debug.log*
+# Vite 开发服务器在配置文件旁生成的临时文件
+*.timestamp-*.mjs
+coverage/
 
 # 环境变量与密钥：忽略所有 .env*，但保留模板
 .env
