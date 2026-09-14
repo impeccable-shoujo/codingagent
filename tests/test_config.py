@@ -6,7 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from agent.config import ConfigError, Settings, describe, load_env_file, mask_secret
+from agent.config import (
+    DEFAULT_MODEL,
+    ConfigError,
+    Settings,
+    describe,
+    load_env_file,
+    mask_secret,
+)
 
 
 def write_env(tmp_path, content: str) -> Path:
@@ -17,7 +24,9 @@ def write_env(tmp_path, content: str) -> Path:
 
 def test_defaults_when_nothing_configured(tmp_path):
     settings = Settings.from_env(env={}, env_file=tmp_path / "missing.env")
-    assert settings.model == "glm-4.7-flash"
+    # 断言引用常量本身，换模型时不需要改测试
+    assert settings.model == DEFAULT_MODEL
+    assert DEFAULT_MODEL
     assert settings.max_iterations == 25
     assert settings.max_consecutive_failures == 3
     assert settings.auto_approve is False
@@ -40,8 +49,8 @@ def test_real_env_overrides_env_file(tmp_path):
 
 
 def test_quoted_values_are_unwrapped(tmp_path):
-    env_file = write_env(tmp_path, 'AGENT_MODEL="glm-4.7-flash"\n')
-    assert Settings.from_env(env={}, env_file=env_file).model == "glm-4.7-flash"
+    env_file = write_env(tmp_path, 'AGENT_MODEL="glm-4.5-air"\n')
+    assert Settings.from_env(env={}, env_file=env_file).model == "glm-4.5-air"
 
 
 def test_env_file_with_comments_and_blank_lines(tmp_path):
@@ -178,3 +187,10 @@ def test_shipped_env_example_is_valid_and_documents_all_keys():
     }
     missing = expected_keys - set(values)
     assert not missing, f".env.example 缺少配置项：{sorted(missing)}"
+
+
+def test_env_example_model_matches_code_default():
+    """模板与代码默认值必须一致，否则新克隆的人会拿到一个和文档不符的模型。"""
+    example = Path(__file__).resolve().parent.parent / ".env.example"
+    values = load_env_file(example)
+    assert values["AGENT_MODEL"] == DEFAULT_MODEL

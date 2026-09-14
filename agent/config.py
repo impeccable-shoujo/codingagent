@@ -22,6 +22,7 @@ from dotenv import dotenv_values
 ENV_PREFIX = "AGENT_"
 DEFAULT_ENV_FILE = Path(".env")
 DEFAULT_API_KEY_ENV = "ZHIPU_API_KEY"
+DEFAULT_MODEL = "glm-4.5-air"
 DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
 
 _TRUE_VALUES = {"1", "true", "yes", "on", "y"}
@@ -102,7 +103,7 @@ def _as_bool(merged: Mapping[str, Any], key: str, default: bool) -> bool:
 class Settings:
     """运行期配置。frozen 是刻意的：配置在启动后不应该被任何代码悄悄改掉。"""
 
-    model: str = "glm-4.7-flash"
+    model: str = DEFAULT_MODEL
     base_url: str = DEFAULT_BASE_URL
     api_key: str | None = None
     temperature: float = 0.0
@@ -134,7 +135,7 @@ class Settings:
             api_key = _lookup(merged, key_var)
 
         return cls(
-            model=_as_str(merged, "MODEL", "glm-4.7-flash") or "glm-4.7-flash",
+            model=_as_str(merged, "MODEL", DEFAULT_MODEL) or DEFAULT_MODEL,
             base_url=_as_str(merged, "BASE_URL", DEFAULT_BASE_URL) or DEFAULT_BASE_URL,
             api_key=api_key,
             temperature=_as_float(merged, "TEMPERATURE", 0.0),
