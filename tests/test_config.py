@@ -184,9 +184,33 @@ def test_shipped_env_example_is_valid_and_documents_all_keys():
         "AGENT_WORKSPACE",
         "AGENT_LOG_DIR",
         "AGENT_AUTO_APPROVE",
+        "AGENT_HOST",
+        "AGENT_PORT",
+        "AGENT_APPROVAL_TIMEOUT",
+        "AGENT_CORS_ORIGINS",
+        "AGENT_MAX_SESSIONS",
     }
     missing = expected_keys - set(values)
     assert not missing, f".env.example 缺少配置项：{sorted(missing)}"
+
+
+def test_cors_origins_parsed_as_list(tmp_path):
+    env_file = write_env(tmp_path, "AGENT_CORS_ORIGINS=http://a.test, http://b.test\n")
+    settings = Settings.from_env(env={}, env_file=env_file)
+    assert settings.cors_origins == ("http://a.test", "http://b.test")
+
+
+def test_blank_cors_origins_falls_back_to_default(tmp_path):
+    env_file = write_env(tmp_path, "AGENT_CORS_ORIGINS=,,\n")
+    assert Settings.from_env(env={}, env_file=env_file).cors_origins
+
+
+def test_server_settings_have_defaults(tmp_path):
+    settings = Settings.from_env(env={}, env_file=tmp_path / "missing.env")
+    assert settings.host == "127.0.0.1"
+    assert settings.port == 8000
+    assert settings.approval_timeout == 300
+    assert settings.max_sessions == 50
 
 
 def test_env_example_model_matches_code_default():

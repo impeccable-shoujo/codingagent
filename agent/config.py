@@ -99,6 +99,14 @@ def _as_bool(merged: Mapping[str, Any], key: str, default: bool) -> bool:
     )
 
 
+def _as_list(merged: Mapping[str, Any], key: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    text = _prefixed(merged, key)
+    if text is None:
+        return default
+    items = tuple(part.strip() for part in text.split(",") if part.strip())
+    return items or default
+
+
 @dataclass(frozen=True)
 class Settings:
     """运行期配置。frozen 是刻意的：配置在启动后不应该被任何代码悄悄改掉。"""
@@ -116,6 +124,16 @@ class Settings:
     log_dir: Path = Path("runs")
     auto_approve: bool = False
     env_file: Path | None = None
+
+    # ---------- HTTP 传输层 ----------
+    host: str = "127.0.0.1"
+    port: int = 8000
+    # 危险命令等待用户点确认的最长时间，超时按拒绝处理
+    approval_timeout: int = 300
+    # 允许的前端来源。默认放行 Vite 开发服务器，方便 v0.3 接前端
+    cors_origins: tuple[str, ...] = ("http://localhost:5173", "http://127.0.0.1:5173")
+    # 内存中保留的会话数上限，避免长跑进程无限增长
+    max_sessions: int = 50
 
     @classmethod
     def from_env(
@@ -148,6 +166,15 @@ class Settings:
             log_dir=Path(_as_str(merged, "LOG_DIR", "runs") or "runs"),
             auto_approve=_as_bool(merged, "AUTO_APPROVE", False),
             env_file=Path(env_file) if env_file else None,
+            host=_as_str(merged, "HOST", "127.0.0.1") or "127.0.0.1",
+            port=_as_int(merged, "PORT", 8000, minimum=1),
+            approval_timeout=_as_int(merged, "APPROVAL_TIMEOUT", 300, minimum=1),
+            cors_origins=_as_list(
+                merged,
+                "CORS_ORIGINS",
+                ("http://localhost:5173", "http://127.0.0.1:5173"),
+            ),
+            max_sessions=_as_int(merged, "MAX_SESSIONS", 50, minimum=1),
         )
 
 
@@ -177,5 +204,9 @@ def describe(settings: Settings) -> str:
         f"  输出截断      {settings.max_output_chars} 字符 / {settings.max_output_lines} 行",
         f"  日志目录      {settings.log_dir}",
         f"  自动批准      {settings.auto_approve}",
+        f"  监听地址      http://{settings.host}:{settings.port}",
+        f"  审批超时      {settings.approval_timeout}s",
+        f"  允许来源      {', '.join(settings.cors_origins)}",
+        f"  会话上限      {settings.max_sessions}",
     ]
     return "\n".join(lines)
