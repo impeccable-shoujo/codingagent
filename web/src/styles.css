@@ -1,0 +1,28 @@
+@import 'tailwindcss';
+
+/* 这是个开发者工具，直接给一套深色底，不做主题切换 */
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  background-color: #09090b;
+  color: #f4f4f5;
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+}
+
+/* 屏幕阅读器可读、视觉上隐藏 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
