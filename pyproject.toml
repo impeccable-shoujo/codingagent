@@ -5,6 +5,7 @@ description = "最小可用的 coding agent：LLM + 工具 + 循环"
 requires-python = ">=3.10"
 dependencies = [
     "openai>=1.0",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]

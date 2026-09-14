@@ -14,9 +14,10 @@ htmlcov/
 node_modules/
 npm-debug.log*
 
-# 环境变量与密钥
+# 环境变量与密钥：忽略所有 .env*，但保留模板
 .env
-.env.local
+.env.*
+!.env.example
 
 # 编辑器
 .idea/
