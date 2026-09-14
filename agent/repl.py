@@ -13,7 +13,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from .app import build_agent
+from .app import build_agent, prepare_workspace
 from .config import DEFAULT_ENV_FILE, ConfigError, Settings, describe
 from .provider import ProviderError
 from .types import AgentEvent
@@ -108,9 +108,10 @@ def main(argv: list[str] | None = None) -> int:
         print(describe(settings))
         return 0
 
-    workspace = Path(settings.workspace).resolve()
-    if not workspace.is_dir():
-        print(f"工作区不存在：{workspace}", file=sys.stderr)
+    try:
+        workspace = prepare_workspace(settings)
+    except OSError as exc:
+        print(f"无法创建或访问工作区：{exc}", file=sys.stderr)
         return 1
 
     def interactive_approval(command: str) -> bool:

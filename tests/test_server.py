@@ -8,6 +8,7 @@ SSE 是流式的、TestClient 是同步的，两者能配合的前提是：会�
 import json
 import threading
 import time
+from datetime import date
 
 import pytest
 
@@ -103,6 +104,31 @@ def test_health_reports_workspace_and_model(tmp_path):
     assert body["status"] == "ok"
     assert str(tmp_path) in body["workspace"]
     assert body["sessions"] == 0
+
+
+def test_health_reports_dated_workspace(tmp_path):
+    """/health 每次请求重算，而不是启动时冻结——否则跨零点就报错目录。"""
+    client, _ = make_client(tmp_path, dated_output=True)
+
+    workspace = client.get("/health").json()["workspace"]
+
+    assert workspace.endswith(date.today().isoformat())
+    assert workspace != str(tmp_path)
+
+
+def test_task_output_lands_in_today_folder(tmp_path):
+    client, _ = make_client(
+        tmp_path,
+        script=[tool_call("write_file", path="out.txt", content="hello")],
+        final_text="写好了",
+        dated_output=True,
+    )
+    task_id = run_task(client, "写个文件")
+    read_stream(client, task_id)
+
+    today_dir = tmp_path / date.today().isoformat()
+    assert (today_dir / "out.txt").read_text(encoding="utf-8") == "hello"
+    assert not (tmp_path / "out.txt").exists()
 
 
 def test_empty_task_is_rejected(tmp_path):

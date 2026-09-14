@@ -5,6 +5,7 @@ CLI 和后续的 FastAPI 传输层都从这里取 agent，接线逻辑只写一�
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from typing import Callable
 
@@ -22,6 +23,22 @@ def build_provider(settings: Settings) -> OpenAICompatProvider:
         base_url=settings.base_url,
         temperature=settings.temperature,
     )
+
+
+def prepare_workspace(
+    settings: Settings,
+    override: Path | str | None = None,
+    today: date | None = None,
+) -> Path:
+    """算出并创建实际使用的工作区。
+
+    打开按日期归档后，当天的目录还不存在，所以创建这一步放在装配阶段——
+    这样"工作区一定存在"成为不变量，工具层和调用方都不用再处理目录缺失的情况。
+    """
+    path = Path(override).expanduser() if override else settings.effective_workspace(today)
+    path = path.resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def build_agent(
@@ -47,7 +64,7 @@ def build_agent(
         approval = (lambda command: True) if settings.auto_approve else (lambda command: False)
 
     ctx = ToolContext(
-        workspace=Path(workspace or settings.workspace).resolve(),
+        workspace=prepare_workspace(settings, override=workspace),
         max_chars=settings.max_output_chars,
         max_lines=settings.max_output_lines,
         timeout=settings.command_timeout,

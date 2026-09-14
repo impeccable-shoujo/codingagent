@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -116,6 +117,8 @@ class Settings:
     api_key: str | None = None
     temperature: float = 0.0
     workspace: Path = Path(".")
+    # 产出按日期归档：工作区自动落到 <workspace>/<YYYY-MM-DD>/ 下
+    dated_output: bool = False
     max_iterations: int = 25
     max_consecutive_failures: int = 3
     max_output_chars: int = 10_000
@@ -134,6 +137,21 @@ class Settings:
     cors_origins: tuple[str, ...] = ("http://localhost:5173", "http://127.0.0.1:5173")
     # 内存中保留的会话数上限，避免长跑进程无限增长
     max_sessions: int = 50
+
+    def effective_workspace(self, today: date | None = None) -> Path:
+        """实际生效的工作区。
+
+        打开 dated_output 后，工作区落到 <workspace>/<YYYY-MM-DD>/。
+        关键在于"产出归到当天文件夹"这件事由**工作区沙箱**保证，而不是靠提示词
+        请模型自觉：工具层的越界检查会把写入拦在当天目录内，模型就算想写别处也写不进去。
+        靠提示词的方案一旦模型不听话就会静默失效。
+
+        代价是拿不到其它日期的文件——需要跨天接续工作时把这个开关关掉即可。
+        """
+        root = Path(self.workspace)
+        if not self.dated_output:
+            return root
+        return root / (today or date.today()).isoformat()
 
     @classmethod
     def from_env(
@@ -158,6 +176,7 @@ class Settings:
             api_key=api_key,
             temperature=_as_float(merged, "TEMPERATURE", 0.0),
             workspace=Path(_as_str(merged, "WORKSPACE", ".") or "."),
+            dated_output=_as_bool(merged, "DATED_OUTPUT", False),
             max_iterations=_as_int(merged, "MAX_ITERATIONS", 25, minimum=1),
             max_consecutive_failures=_as_int(merged, "MAX_CONSECUTIVE_FAILURES", 3, minimum=1),
             max_output_chars=_as_int(merged, "MAX_OUTPUT_CHARS", 10_000, minimum=100),
@@ -198,6 +217,7 @@ def describe(settings: Settings) -> str:
         f"  密钥          {mask_secret(settings.api_key)}",
         f"  温度          {settings.temperature}",
         f"  工作区        {Path(settings.workspace).resolve()}",
+        f"  按日期归档    {'是 → ' + str(settings.effective_workspace().resolve()) if settings.dated_output else '否'}",
         f"  最大迭代      {settings.max_iterations}",
         f"  连续失败熔断  {settings.max_consecutive_failures}",
         f"  命令超时      {settings.command_timeout}s",

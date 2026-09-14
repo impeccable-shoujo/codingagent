@@ -17,7 +17,6 @@ import argparse
 import asyncio
 import json
 import sys
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -138,7 +137,8 @@ def create_app(settings: Settings | None = None, provider_factory=None) -> FastA
         return {
             "status": "ok",
             "model": settings.model,
-            "workspace": str(Path(settings.workspace).resolve()),
+            # 每次请求重算：开启按日期归档后，跨零点这里要跟着变
+            "workspace": str(settings.effective_workspace().resolve()),
             "sessions": manager.count(),
         }
 

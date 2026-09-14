@@ -2,6 +2,7 @@
 
 import dataclasses
 import os
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -182,6 +183,7 @@ def test_shipped_env_example_is_valid_and_documents_all_keys():
         "AGENT_MAX_OUTPUT_CHARS",
         "AGENT_MAX_OUTPUT_LINES",
         "AGENT_WORKSPACE",
+        "AGENT_DATED_OUTPUT",
         "AGENT_LOG_DIR",
         "AGENT_AUTO_APPROVE",
         "AGENT_HOST",
@@ -203,6 +205,38 @@ def test_cors_origins_parsed_as_list(tmp_path):
 def test_blank_cors_origins_falls_back_to_default(tmp_path):
     env_file = write_env(tmp_path, "AGENT_CORS_ORIGINS=,,\n")
     assert Settings.from_env(env={}, env_file=env_file).cors_origins
+
+
+def test_dated_output_defaults_to_off(tmp_path):
+    """默认不归档：别人的仓库直接拿来用，不该被日期目录改变行为。"""
+    settings = Settings.from_env(env={}, env_file=tmp_path / "missing.env")
+
+    assert settings.dated_output is False
+    assert settings.effective_workspace() == settings.workspace
+
+
+def test_dated_output_can_be_enabled_from_env(tmp_path):
+    env_file = write_env(tmp_path, "AGENT_DATED_OUTPUT=true\n")
+    assert Settings.from_env(env={}, env_file=env_file).dated_output is True
+
+
+def test_effective_workspace_appends_iso_date(tmp_path):
+    settings = Settings(workspace=tmp_path, dated_output=True)
+
+    assert settings.effective_workspace(date(2026, 9, 14)) == tmp_path / "2026-09-14"
+    # 不传日期时用当天，ISO 格式便于排序
+    assert settings.effective_workspace() == tmp_path / date.today().isoformat()
+
+
+def test_effective_workspace_ignores_date_when_disabled(tmp_path):
+    settings = Settings(workspace=tmp_path)
+    assert settings.effective_workspace(date(2026, 9, 14)) == tmp_path
+
+
+def test_describe_shows_effective_workspace_when_dated(tmp_path):
+    settings = Settings(workspace=tmp_path, dated_output=True)
+    text = describe(settings)
+    assert date.today().isoformat() in text
 
 
 def test_server_settings_have_defaults(tmp_path):

@@ -1,5 +1,6 @@
 """组装与 CLI 测试：验证配置真的接到了 agent 上，而不是只存在于文件里。"""
 
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,63 @@ def test_output_limits_from_settings_are_applied(tmp_path):
     assert result.ok
     assert result.truncated
     assert "已省略" in result.output
+
+
+def test_workspace_directory_is_created_by_assembly(tmp_path):
+    """工作区可能还不存在（按日期归档时就会这样），装配阶段负责建好。"""
+    target = tmp_path / "not-yet" / "deeper"
+    settings = make_settings(tmp_path, workspace=target, dated_output=True)
+
+    build_agent(settings, with_log=False)
+
+    assert (target / date.today().isoformat()).is_dir()
+
+
+def test_dated_output_lands_in_today_folder(tmp_path):
+    loop = build_agent(make_settings(tmp_path, dated_output=True), with_log=False)
+
+    result = loop.tools.get("write_file").fn({"path": "a.txt", "content": "v"})
+
+    assert result.ok
+    today_dir = tmp_path / date.today().isoformat()
+    assert (today_dir / "a.txt").read_text(encoding="utf-8") == "v"
+    assert not (tmp_path / "a.txt").exists(), "不该落在工作区根目录"
+
+
+def test_dated_output_confines_writes_to_today(tmp_path):
+    """昨天/明天的目录在沙箱之外，写不进去——归档靠沙箱强制，不靠模型自觉。"""
+    other_day = (date.today() - timedelta(days=1)).isoformat()
+    (tmp_path / other_day).mkdir()
+    loop = build_agent(make_settings(tmp_path, dated_output=True), with_log=False)
+
+    result = loop.tools.get("write_file").fn({"path": f"../{other_day}/x.txt", "content": "v"})
+
+    assert not result.ok
+    assert "越界" in result.error
+    assert not (tmp_path / other_day / "x.txt").exists()
+
+
+def test_dated_output_reads_today_folder(tmp_path):
+    """读也要在同一目录内，否则归档只剩一半。"""
+    today_dir = tmp_path / date.today().isoformat()
+    today_dir.mkdir()
+    (today_dir / "note.txt").write_text("今天的内容", encoding="utf-8")
+    loop = build_agent(make_settings(tmp_path, dated_output=True), with_log=False)
+
+    result = loop.tools.get("read_file").fn({"path": "note.txt"})
+
+    assert result.ok
+    assert "今天的内容" in result.output
+
+
+def test_dated_output_off_uses_workspace_root(tmp_path):
+    """关掉开关时行为与之前完全一致——老用户不受影响。"""
+    loop = build_agent(make_settings(tmp_path), with_log=False)
+
+    result = loop.tools.get("write_file").fn({"path": "a.txt", "content": "v"})
+
+    assert result.ok
+    assert (tmp_path / "a.txt").exists()
 
 
 def test_missing_api_key_raises_provider_error(tmp_path):
