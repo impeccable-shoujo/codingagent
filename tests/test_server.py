@@ -6,9 +6,12 @@ SSE 是流式的、TestClient 是同步的，两者能配合的前提是：会�
 """
 
 import json
+import subprocess
+import sys
 import threading
 import time
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -364,3 +367,44 @@ def test_format_sse_carries_full_envelope():
 def test_format_sse_keeps_chinese_readable():
     frame = format_sse(AgentEvent(type="done", data={"text": "已完成"}))
     assert "已完成" in frame, "不应被转义成 \\uXXXX，否则前端调试很难读"
+
+
+# ---------- 启动方式 ----------
+
+
+def run_python(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
+
+
+def test_direct_execution_gives_actionable_guidance():
+    """直接跑 __main__.py 要给出明确指引，而不是抛看不懂的 ImportError。
+
+    这是真实踩到的：在 agent/server 目录里执行 python __main__.py，
+    报 "attempted relative import with no known parent package"。
+    """
+    script = Path(__file__).resolve().parent.parent / "agent" / "server" / "__main__.py"
+
+    result = run_python([str(script)], cwd=script.parent)
+
+    assert result.returncode == 2
+    assert "python -m agent.server" in result.stderr
+    # 顺带提醒必须在仓库根目录启动，否则读不到 .env
+    assert ".env" in result.stderr
+
+
+def test_module_invocation_works():
+    """python -m agent.server --help 要能正常跑通。"""
+    root = Path(__file__).resolve().parent.parent
+
+    result = run_python(["-m", "agent.server", "--help"], cwd=root)
+
+    assert result.returncode == 0
+    assert "--port" in result.stdout
